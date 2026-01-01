@@ -20,6 +20,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        self.click_count = 0  # Счётчик нажатий
+
         self.setWindowTitle("Моё приложение")
         self.setMinimumSize(400, 300)
 
@@ -43,12 +45,10 @@ class MainWindow(QMainWindow):
         self.button.clicked.connect(self.on_button_click)
         layout.addWidget(self.button)
 
-        self.click_count = 0
-
     def on_button_click(self):
         """Обработчик нажатия кнопки."""
         self.click_count += 1
-        self.label.setText(f"Нажатий: {self.click_count}")
+        self.label.setText(f"Минимальная программа на Python\nНажатий: {self.click_count}")
 
 
 def main():
