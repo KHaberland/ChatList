@@ -25,6 +25,7 @@ class APIProvider(Enum):
     ANTHROPIC = "anthropic"
     DEEPSEEK = "deepseek"
     GROQ = "groq"
+    OPENROUTER = "openrouter"
     CUSTOM = "custom"
 
 
@@ -44,6 +45,7 @@ def get_api_key(provider: APIProvider) -> Optional[str]:
         APIProvider.ANTHROPIC: "ANTHROPIC_API_KEY",
         APIProvider.DEEPSEEK: "DEEPSEEK_API_KEY",
         APIProvider.GROQ: "GROQ_API_KEY",
+        APIProvider.OPENROUTER: "OPENROUTER_API_KEY",
     }
     env_var = key_mapping.get(provider)
     if env_var:
@@ -62,6 +64,8 @@ def detect_provider(api_url: str) -> APIProvider:
         return APIProvider.DEEPSEEK
     elif "groq.com" in url_lower:
         return APIProvider.GROQ
+    elif "openrouter.ai" in url_lower:
+        return APIProvider.OPENROUTER
     return APIProvider.CUSTOM
 
 

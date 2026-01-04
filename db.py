@@ -92,19 +92,29 @@ def seed_db():
     with get_connection() as conn:
         cursor = conn.cursor()
         
-        # Проверяем, есть ли уже модели
-        cursor.execute("SELECT COUNT(*) FROM models")
-        if cursor.fetchone()[0] == 0:
-            # Добавляем тестовые модели
-            test_models = [
-                ("GPT-4o", "https://api.openai.com/v1/chat/completions", "gpt-4o"),
-                ("GPT-4o-mini", "https://api.openai.com/v1/chat/completions", "gpt-4o-mini"),
-                ("DeepSeek V3", "https://api.deepseek.com/v1/chat/completions", "deepseek-chat"),
-                ("Claude 3.5 Sonnet", "https://api.anthropic.com/v1/messages", "claude-3-5-sonnet-20241022"),
-            ]
-            cursor.executemany(
-                "INSERT INTO models (name, api_url, api_id) VALUES (?, ?, ?)",
-                test_models
+        # Модели для добавления (OpenRouter использует OpenAI-совместимый формат)
+        openrouter_url = "https://openrouter.ai/api/v1/chat/completions"
+        all_models = [
+            # OpenRouter модели (рекомендуемые)
+            ("GPT-4o (OpenRouter)", openrouter_url, "openai/gpt-4o"),
+            ("GPT-4o-mini (OpenRouter)", openrouter_url, "openai/gpt-4o-mini"),
+            ("Claude 3.5 Sonnet (OpenRouter)", openrouter_url, "anthropic/claude-3.5-sonnet"),
+            ("Claude 3 Opus (OpenRouter)", openrouter_url, "anthropic/claude-3-opus"),
+            ("Gemini Pro 1.5 (OpenRouter)", openrouter_url, "google/gemini-pro-1.5"),
+            ("DeepSeek V3 (OpenRouter)", openrouter_url, "deepseek/deepseek-chat"),
+            ("Llama 3.3 70B (OpenRouter)", openrouter_url, "meta-llama/llama-3.3-70b-instruct"),
+            ("Mixtral 8x7B (OpenRouter)", openrouter_url, "mistralai/mixtral-8x7b-instruct"),
+            # Прямые API (опционально, требуют отдельных ключей)
+            ("GPT-4o (Direct)", "https://api.openai.com/v1/chat/completions", "gpt-4o"),
+            ("DeepSeek V3 (Direct)", "https://api.deepseek.com/v1/chat/completions", "deepseek-chat"),
+            ("Claude 3.5 Sonnet (Direct)", "https://api.anthropic.com/v1/messages", "claude-3-5-sonnet-20241022"),
+        ]
+        
+        # Добавляем только те модели, которых ещё нет
+        for name, api_url, api_id in all_models:
+            cursor.execute(
+                "INSERT OR IGNORE INTO models (name, api_url, api_id) VALUES (?, ?, ?)",
+                (name, api_url, api_id)
             )
         
         # Добавляем настройки по умолчанию
