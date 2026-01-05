@@ -95,7 +95,14 @@ def seed_db():
         # Модели для добавления (OpenRouter использует OpenAI-совместимый формат)
         openrouter_url = "https://openrouter.ai/api/v1/chat/completions"
         all_models = [
-            # OpenRouter модели (рекомендуемые)
+            # ===== Лёгкие модели OpenRouter =====
+            ("🦙 Llama 3.2 3B", openrouter_url, "meta-llama/llama-3.2-3b-instruct"),
+            ("💎 Gemma 2 9B", openrouter_url, "google/gemma-2-9b-it"),
+            ("🌀 Mistral 7B", openrouter_url, "mistralai/mistral-7b-instruct"),
+            ("🔮 Qwen 2.5 72B", openrouter_url, "qwen/qwen-2.5-72b-instruct"),
+            ("🧠 DeepSeek R1", openrouter_url, "deepseek/deepseek-r1"),
+            
+            # OpenRouter модели (топовые)
             ("GPT-4o (OpenRouter)", openrouter_url, "openai/gpt-4o"),
             ("GPT-4o-mini (OpenRouter)", openrouter_url, "openai/gpt-4o-mini"),
             ("Claude 3.5 Sonnet (OpenRouter)", openrouter_url, "anthropic/claude-3.5-sonnet"),
@@ -161,22 +168,41 @@ def get_prompt(prompt_id: int) -> Optional[Prompt]:
         return None
 
 
-def get_all_prompts(search: str = "", limit: int = 100) -> List[Prompt]:
-    """Получить список промптов с возможностью поиска."""
+def get_all_prompts(search: str = "", date_from: str = "", date_to: str = "", limit: int = 100) -> List[Prompt]:
+    """Получить список промптов с возможностью поиска по тексту и дате.
+    
+    Args:
+        search: Текст для поиска в промптах
+        date_from: Начальная дата в формате YYYY-MM-DD
+        date_to: Конечная дата в формате YYYY-MM-DD
+        limit: Максимальное количество результатов
+    """
     with get_connection() as conn:
         cursor = conn.cursor()
+        
+        conditions = []
+        params = []
+        
         if search:
-            cursor.execute(
-                """SELECT * FROM prompts 
-                   WHERE text LIKE ? 
-                   ORDER BY created_at DESC LIMIT ?""",
-                (f"%{search}%", limit)
-            )
-        else:
-            cursor.execute(
-                "SELECT * FROM prompts ORDER BY created_at DESC LIMIT ?",
-                (limit,)
-            )
+            conditions.append("text LIKE ?")
+            params.append(f"%{search}%")
+        
+        if date_from:
+            conditions.append("date(created_at) >= ?")
+            params.append(date_from)
+        
+        if date_to:
+            conditions.append("date(created_at) <= ?")
+            params.append(date_to)
+        
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        params.append(limit)
+        
+        cursor.execute(
+            f"SELECT * FROM prompts WHERE {where_clause} ORDER BY created_at DESC LIMIT ?",
+            params
+        )
+        
         return [
             Prompt(
                 id=row["id"],
