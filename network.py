@@ -38,6 +38,17 @@ class APIResponse:
     tokens_used: int = 0
 
 
+@dataclass
+class ImprovedPrompt:
+    """Результат улучшения промта."""
+    improved: str
+    code_variant: str
+    analysis_variant: str
+    creative_variant: str
+    success: bool
+    error: Optional[str] = None
+
+
 def get_api_key(provider: APIProvider) -> Optional[str]:
     """Получить API ключ для провайдера."""
     key_mapping = {
@@ -296,3 +307,88 @@ async def send_to_multiple_models(
     
     return {model_id: response for model_id, response in results}
 
+
+# Системный промпт для AI-ассистента улучшения промптов
+IMPROVE_PROMPT_SYSTEM = """Ты - эксперт по написанию промптов для языковых моделей.
+Проанализируй следующий промпт пользователя и верни ТОЛЬКО валидный JSON без дополнительного текста.
+
+Верни JSON с 4 вариантами улучшенного промта:
+1. "improved" - улучшенная версия с лучшей структурой, ясностью и деталями
+2. "code_variant" - адаптация для задач программирования (добавь контекст про код, язык, примеры)
+3. "analysis_variant" - адаптация для аналитических задач (добавь структуру, метрики, сравнения)
+4. "creative_variant" - адаптация для творческих задач (добавь стиль, тон, креативные элементы)
+
+Формат ответа - ТОЛЬКО JSON:
+{
+  "improved": "улучшенный промпт здесь",
+  "code_variant": "промпт для кода здесь",
+  "analysis_variant": "промпт для анализа здесь",
+  "creative_variant": "креативный промпт здесь"
+}"""
+
+
+def _parse_improved_prompt_response(content: str) -> ImprovedPrompt:
+    """Парсинг ответа AI с улучшенными промптами."""
+    import json
+    import re
+    
+    try:
+        # Пытаемся найти JSON в ответе
+        # Сначала пробуем напрямую
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            # Ищем JSON в тексте между фигурными скобками
+            json_match = re.search(r'\{[^{}]*\}', content, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group())
+            else:
+                # Пробуем найти многострочный JSON
+                json_match = re.search(r'\{.*?\}', content, re.DOTALL)
+                if json_match:
+                    data = json.loads(json_match.group())
+                else:
+                    raise ValueError("JSON не найден в ответе")
+        
+        return ImprovedPrompt(
+            improved=data.get("improved", ""),
+            code_variant=data.get("code_variant", ""),
+            analysis_variant=data.get("analysis_variant", ""),
+            creative_variant=data.get("creative_variant", ""),
+            success=True
+        )
+    except Exception as e:
+        return ImprovedPrompt(
+            improved="",
+            code_variant="",
+            analysis_variant="",
+            creative_variant="",
+            success=False,
+            error=f"Ошибка парсинга ответа: {e}\n\nОтвет модели:\n{content[:500]}"
+        )
+
+
+async def improve_prompt(
+    model: Model,
+    original_prompt: str,
+    timeout: int = 60
+) -> ImprovedPrompt:
+    """Отправить промпт на улучшение в указанную модель."""
+    client = LLMClient(timeout=timeout)
+    
+    # Формируем запрос для улучшения промта
+    full_prompt = f"{IMPROVE_PROMPT_SYSTEM}\n\nПромпт пользователя для улучшения:\n\"\"\"\n{original_prompt}\n\"\"\""
+    
+    response = await client.send_prompt(model, full_prompt, max_tokens=2000)
+    
+    if not response.success:
+        return ImprovedPrompt(
+            improved="",
+            code_variant="",
+            analysis_variant="",
+            creative_variant="",
+            success=False,
+            error=response.error
+        )
+    
+    return _parse_improved_prompt_response(response.content)

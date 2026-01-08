@@ -40,11 +40,11 @@ from PyQt6.QtWidgets import (
     QTabWidget,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QDate
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIcon
 
 import db
 from models import Prompt, Model, Result, Settings
-from network import LLMClient, send_to_multiple_models, APIResponse
+from network import LLMClient, send_to_multiple_models, APIResponse, improve_prompt, ImprovedPrompt
 
 
 # =====================
@@ -461,6 +461,31 @@ class APIWorker(QThread):
             self.error.emit(str(e))
 
 
+class ImproveWorker(QThread):
+    """Фоновый поток для улучшения промта."""
+    
+    finished = pyqtSignal(object)  # ImprovedPrompt
+    error = pyqtSignal(str)
+    
+    def __init__(self, model: Model, prompt: str, timeout: int = 60):
+        super().__init__()
+        self.model = model
+        self.prompt = prompt
+        self.timeout = timeout
+    
+    def run(self):
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(
+                improve_prompt(self.model, self.prompt, self.timeout)
+            )
+            loop.close()
+            self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 # =====================
 # Диалог просмотра Markdown
 # =====================
@@ -620,6 +645,90 @@ class MarkdownViewerDialog(QDialog):
         close_btn.clicked.connect(self.accept)
         button_layout.addWidget(close_btn)
         
+        layout.addLayout(button_layout)
+
+
+# =====================
+# Диалог "О программе"
+# =====================
+
+class AboutDialog(QDialog):
+    """Диалог с информацией о программе."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("О программе")
+        self.setMinimumSize(500, 400)
+        self.resize(550, 450)
+        
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(20)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        # Заголовок с иконкой
+        header_layout = QHBoxLayout()
+        header_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        icon_label = QLabel("🤖")
+        icon_label.setStyleSheet("font-size: 64px;")
+        header_layout.addWidget(icon_label)
+        
+        layout.addLayout(header_layout)
+        
+        # Название приложения
+        title_label = QLabel("ChatList")
+        title_label.setStyleSheet("""
+            font-size: 28px;
+            font-weight: bold;
+            color: #89b4fa;
+        """)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title_label)
+        
+        # Версия
+        version_label = QLabel("Версия 1.0.0")
+        version_label.setStyleSheet("font-size: 14px; color: #6c7086;")
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(version_label)
+        
+        # Описание
+        description = QLabel(
+            "ChatList — это приложение для сравнения ответов различных LLM моделей.\n\n"
+            "Вы можете отправить один промпт в несколько нейросетей одновременно "
+            "и сравнить их ответы в удобном интерфейсе.\n\n"
+            "Возможности:\n"
+            "• Поддержка множества LLM моделей через OpenRouter API\n"
+            "• AI-ассистент для улучшения промптов\n"
+            "• История запросов с фильтрацией по дате\n"
+            "• Экспорт результатов в Markdown и JSON\n"
+            "• Тёмная и светлая темы оформления"
+        )
+        description.setWordWrap(True)
+        description.setStyleSheet("font-size: 13px; line-height: 1.5;")
+        description.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(description)
+        
+        layout.addStretch()
+        
+        # Автор / копирайт
+        copyright_label = QLabel("© 2025 ChatList")
+        copyright_label.setStyleSheet("font-size: 12px; color: #6c7086;")
+        copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(copyright_label)
+        
+        # Кнопка закрытия
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        close_btn = QPushButton("Закрыть")
+        close_btn.setFixedWidth(120)
+        close_btn.clicked.connect(self.accept)
+        button_layout.addWidget(close_btn)
+        
+        button_layout.addStretch()
         layout.addLayout(button_layout)
 
 
@@ -882,6 +991,195 @@ class SettingsDialog(QDialog):
 
 
 # =====================
+# Диалог улучшения промта
+# =====================
+
+class ImprovePromptDialog(QDialog):
+    """Диалог с результатами улучшения промта."""
+    
+    prompt_selected = pyqtSignal(str)  # Сигнал выбора промта
+    
+    def __init__(self, original_prompt: str, parent=None):
+        super().__init__(parent)
+        self.original_prompt = original_prompt
+        self.setWindowTitle("✨ Улучшение промта")
+        self.setMinimumSize(900, 700)
+        self.resize(950, 750)
+        
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Заголовок
+        title_label = QLabel("✨ AI-ассистент для улучшения промтов")
+        title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #89b4fa;")
+        layout.addWidget(title_label)
+        
+        # Исходный промпт
+        original_group = QGroupBox("📝 Исходный промпт")
+        original_layout = QVBoxLayout(original_group)
+        
+        original_text = QTextEdit()
+        original_text.setPlainText(self.original_prompt)
+        original_text.setReadOnly(True)
+        original_text.setMaximumHeight(80)
+        original_layout.addWidget(original_text)
+        
+        layout.addWidget(original_group)
+        
+        # Индикатор загрузки
+        self.loading_label = QLabel("⏳ Генерация вариантов...")
+        self.loading_label.setStyleSheet("font-size: 16px; color: #f9e2af; padding: 20px;")
+        self.loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.loading_label)
+        
+        # Контейнер для вариантов (скрыт до загрузки)
+        self.variants_widget = QWidget()
+        self.variants_widget.hide()
+        variants_layout = QVBoxLayout(self.variants_widget)
+        variants_layout.setSpacing(10)
+        
+        # Создаём области для 4 вариантов в скролле
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        scroll_content = QWidget()
+        self.scroll_layout = QVBoxLayout(scroll_content)
+        self.scroll_layout.setSpacing(15)
+        
+        # Плейсхолдеры для вариантов
+        self.variant_widgets = {}
+        variants_info = [
+            ("improved", "⭐ Улучшенная версия", "Оптимизированный промпт с лучшей структурой"),
+            ("code_variant", "💻 Для кода", "Адаптация для задач программирования"),
+            ("analysis_variant", "📊 Для анализа", "Адаптация для аналитических задач"),
+            ("creative_variant", "🎨 Креативный", "Адаптация для творческих задач"),
+        ]
+        
+        for key, title, description in variants_info:
+            variant_frame = self._create_variant_frame(key, title, description)
+            self.scroll_layout.addWidget(variant_frame)
+        
+        self.scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        variants_layout.addWidget(scroll)
+        
+        layout.addWidget(self.variants_widget, 1)
+        
+        # Кнопка закрытия
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        close_btn = QPushButton("Закрыть")
+        close_btn.setObjectName("secondary")
+        close_btn.clicked.connect(self.reject)
+        button_layout.addWidget(close_btn)
+        
+        layout.addLayout(button_layout)
+    
+    def _create_variant_frame(self, key: str, title: str, description: str) -> QFrame:
+        """Создание фрейма для варианта промта."""
+        frame = QFrame()
+        frame.setObjectName("resultCard")
+        frame.setStyleSheet("""
+            QFrame#resultCard {
+                background-color: #313244;
+                border: 1px solid #45475a;
+                border-radius: 10px;
+                padding: 10px;
+            }
+        """)
+        
+        layout = QVBoxLayout(frame)
+        layout.setSpacing(8)
+        
+        # Заголовок варианта
+        header = QHBoxLayout()
+        
+        title_label = QLabel(title)
+        title_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #89b4fa;")
+        header.addWidget(title_label)
+        
+        desc_label = QLabel(f"— {description}")
+        desc_label.setStyleSheet("color: #6c7086; font-size: 12px;")
+        header.addWidget(desc_label)
+        
+        header.addStretch()
+        
+        # Кнопка "Использовать"
+        use_btn = QPushButton("✓ Использовать")
+        use_btn.setFixedWidth(120)
+        use_btn.clicked.connect(lambda: self._on_use_clicked(key))
+        header.addWidget(use_btn)
+        
+        # Кнопка "Копировать"
+        copy_btn = QPushButton("📋")
+        copy_btn.setObjectName("secondary")
+        copy_btn.setFixedWidth(40)
+        copy_btn.setToolTip("Копировать в буфер обмена")
+        copy_btn.clicked.connect(lambda: self._on_copy_clicked(key))
+        header.addWidget(copy_btn)
+        
+        layout.addLayout(header)
+        
+        # Текст варианта
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        text_edit.setMinimumHeight(80)
+        text_edit.setMaximumHeight(120)
+        text_edit.setPlaceholderText("Загрузка...")
+        layout.addWidget(text_edit)
+        
+        self.variant_widgets[key] = text_edit
+        
+        return frame
+    
+    def set_results(self, result: ImprovedPrompt):
+        """Установить результаты улучшения."""
+        self.loading_label.hide()
+        self.variants_widget.show()
+        
+        if not result.success:
+            # Показываем ошибку
+            error_label = QLabel(f"❌ Ошибка: {result.error}")
+            error_label.setStyleSheet("color: #f38ba8; padding: 20px;")
+            error_label.setWordWrap(True)
+            self.scroll_layout.insertWidget(0, error_label)
+            return
+        
+        # Заполняем варианты
+        self.variant_widgets["improved"].setPlainText(result.improved)
+        self.variant_widgets["code_variant"].setPlainText(result.code_variant)
+        self.variant_widgets["analysis_variant"].setPlainText(result.analysis_variant)
+        self.variant_widgets["creative_variant"].setPlainText(result.creative_variant)
+    
+    def set_error(self, error: str):
+        """Показать ошибку."""
+        self.loading_label.setText(f"❌ Ошибка: {error}")
+        self.loading_label.setStyleSheet("color: #f38ba8; padding: 20px;")
+    
+    def _on_use_clicked(self, key: str):
+        """Использовать выбранный вариант."""
+        text = self.variant_widgets[key].toPlainText()
+        if text:
+            self.prompt_selected.emit(text)
+            self.accept()
+    
+    def _on_copy_clicked(self, key: str):
+        """Копировать вариант в буфер обмена."""
+        text = self.variant_widgets[key].toPlainText()
+        if text:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(text)
+            # Показываем уведомление
+            QMessageBox.information(self, "Скопировано", "Текст скопирован в буфер обмена")
+
+
+# =====================
 # Виджет карточки результата
 # =====================
 
@@ -993,6 +1291,8 @@ class MainWindow(QMainWindow):
         self.current_prompt_id: Optional[int] = None
         self.result_cards: List[ResultCard] = []
         self.api_worker: Optional[APIWorker] = None
+        self.improve_worker: Optional[ImproveWorker] = None
+        self.improve_dialog: Optional[ImprovePromptDialog] = None
         self.current_theme: str = "dark"
         
         self._setup_window()
@@ -1079,6 +1379,13 @@ class MainWindow(QMainWindow):
         settings_btn.clicked.connect(self._open_settings)
         layout.addWidget(settings_btn)
         
+        # Кнопка "О программе"
+        about_btn = QPushButton("ℹ️")
+        about_btn.setObjectName("icon")
+        about_btn.setToolTip("О программе")
+        about_btn.clicked.connect(self._open_about)
+        layout.addWidget(about_btn)
+        
         return header
     
     def _create_left_panel(self) -> QWidget:
@@ -1137,10 +1444,21 @@ class MainWindow(QMainWindow):
         self.prompt_input.setMinimumHeight(150)
         prompt_layout.addWidget(self.prompt_input)
         
+        # Кнопки действий с промптом
+        buttons_layout = QHBoxLayout()
+        
+        # Кнопка улучшения промта
+        self.improve_btn = QPushButton("✨ Улучшить промт")
+        self.improve_btn.setObjectName("secondary")
+        self.improve_btn.clicked.connect(self._on_improve_clicked)
+        buttons_layout.addWidget(self.improve_btn)
+        
         # Кнопка отправки
         self.send_button = QPushButton("🚀 Отправить")
         self.send_button.clicked.connect(self._on_send_clicked)
-        prompt_layout.addWidget(self.send_button)
+        buttons_layout.addWidget(self.send_button)
+        
+        prompt_layout.addLayout(buttons_layout)
         
         layout.addWidget(prompt_group)
         
@@ -1401,6 +1719,11 @@ class MainWindow(QMainWindow):
         dialog.settings_changed.connect(self._on_settings_changed)
         dialog.exec()
     
+    def _open_about(self):
+        """Открыть диалог 'О программе'."""
+        dialog = AboutDialog(self)
+        dialog.exec()
+    
     def _on_settings_changed(self):
         """Обработчик изменения настроек."""
         self._load_models()
@@ -1410,6 +1733,112 @@ class MainWindow(QMainWindow):
             self.theme_btn.setText("☀️")
         else:
             self.theme_btn.setText("🌙")
+    
+    def _select_improve_model(self) -> Optional[Model]:
+        """Выбор модели для улучшения промта."""
+        # Получаем активные модели
+        models = db.get_all_models(active_only=True)
+        if not models:
+            QMessageBox.warning(self, "Внимание", "Нет активных моделей. Добавьте модели в настройках.")
+            return None
+        
+        # Сортируем: сначала OpenRouter модели (рекомендуются)
+        openrouter_models = [m for m in models if "openrouter.ai" in m.api_url.lower()]
+        other_models = [m for m in models if "openrouter.ai" not in m.api_url.lower()]
+        sorted_models = openrouter_models + other_models
+        
+        # Получаем сохранённый ID модели для улучшения
+        saved_model_id = db.get_setting("improve_model_id", "")
+        
+        # Создаём диалог выбора модели
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Выбор модели для улучшения")
+        dialog.setMinimumWidth(450)
+        
+        layout = QVBoxLayout(dialog)
+        
+        label = QLabel("Выберите модель для генерации улучшенных вариантов:")
+        layout.addWidget(label)
+        
+        hint_label = QLabel("💡 Модели OpenRouter используют ваш OPENROUTER_API_KEY")
+        hint_label.setStyleSheet("color: #6c7086; font-size: 11px;")
+        layout.addWidget(hint_label)
+        
+        combo = QComboBox()
+        default_index = 0
+        for i, model in enumerate(sorted_models):
+            # Добавляем пометку для OpenRouter моделей
+            if "openrouter.ai" in model.api_url.lower():
+                display_name = f"🌐 {model.name}"
+            else:
+                display_name = f"🔑 {model.name} (нужен отдельный ключ)"
+            combo.addItem(display_name, model.id)
+            if saved_model_id and str(model.id) == saved_model_id:
+                default_index = i
+        combo.setCurrentIndex(default_index)
+        layout.addWidget(combo)
+        
+        # Кнопки
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(dialog.accept)
+        btn_layout.addWidget(ok_btn)
+        
+        cancel_btn = QPushButton("Отмена")
+        cancel_btn.setObjectName("secondary")
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(btn_layout)
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            selected_id = combo.currentData()
+            # Сохраняем выбор
+            db.set_setting("improve_model_id", str(selected_id))
+            return db.get_model(selected_id)
+        
+        return None
+    
+    def _on_improve_clicked(self):
+        """Обработчик нажатия кнопки улучшения промта."""
+        prompt_text = self.prompt_input.toPlainText().strip()
+        if not prompt_text:
+            QMessageBox.warning(self, "Внимание", "Введите текст промпта")
+            return
+        
+        # Выбор модели для улучшения
+        model = self._select_improve_model()
+        if not model:
+            return
+        
+        # Создаём диалог с индикатором загрузки
+        self.improve_dialog = ImprovePromptDialog(prompt_text, self)
+        
+        # Запускаем фоновый запрос
+        settings = db.get_all_settings()
+        self.improve_worker = ImproveWorker(model, prompt_text, settings.request_timeout + 30)
+        self.improve_worker.finished.connect(self._on_improve_finished)
+        self.improve_worker.error.connect(self._on_improve_error)
+        self.improve_worker.start()
+        
+        # Подключаем сигнал выбора промта
+        self.improve_dialog.prompt_selected.connect(
+            lambda text: self.prompt_input.setPlainText(text)
+        )
+        
+        self.improve_dialog.exec()
+    
+    def _on_improve_finished(self, result: ImprovedPrompt):
+        """Обработчик завершения улучшения промта."""
+        if self.improve_dialog:
+            self.improve_dialog.set_results(result)
+    
+    def _on_improve_error(self, error: str):
+        """Обработчик ошибки улучшения промта."""
+        if self.improve_dialog:
+            self.improve_dialog.set_error(error)
     
     def _on_send_clicked(self):
         """Обработчик нажатия кнопки отправки."""
@@ -1583,6 +2012,12 @@ def main():
     """Точка входа в приложение."""
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    
+    # Установка иконки приложения
+    import os
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.ico")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
     
     window = MainWindow()
     window.show()
