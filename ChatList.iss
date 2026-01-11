@@ -45,8 +45,6 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 ; Основной исполняемый файл
 Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-; Файл конфигурации API ключей (не перезаписывать при обновлении)
-Source: ".env"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist
 ; Лицензия
 Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
