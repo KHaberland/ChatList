@@ -4,6 +4,7 @@
 """
 
 import os
+import sys
 import asyncio
 from typing import Optional, AsyncGenerator, Callable
 from dataclasses import dataclass
@@ -15,8 +16,19 @@ from dotenv import load_dotenv
 from models import Model
 
 
-# Загрузка переменных окружения
-load_dotenv()
+def get_app_dir() -> str:
+    """Получить директорию приложения (работает и для .exe и для .py)."""
+    if getattr(sys, 'frozen', False):
+        # Запущено как .exe (PyInstaller)
+        return os.path.dirname(sys.executable)
+    else:
+        # Запущено как .py скрипт
+        return os.path.dirname(os.path.abspath(__file__))
+
+
+# Загрузка переменных окружения из папки приложения
+env_path = os.path.join(get_app_dir(), '.env')
+load_dotenv(env_path)
 
 
 class APIProvider(Enum):
