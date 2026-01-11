@@ -8,6 +8,9 @@ on:
     tags:
       - 'v*'  # Запуск при пуше тега вида v1.0.0, v1.0.1 и т.д.
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
